@@ -20,6 +20,7 @@ import java.time.Duration;
 public class HealthScoreEngineImpl implements HealthScoreEngine {
 
     private final HealthScoreRepository healthScoreRepository;
+    private final java.util.Map<String, HealthScoreDto> latestHealthScoreCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     @Transactional
@@ -98,7 +99,7 @@ public class HealthScoreEngineImpl implements HealthScoreEngine {
 
         healthScore = healthScoreRepository.save(healthScore);
 
-        return HealthScoreDto.builder()
+        HealthScoreDto dto = HealthScoreDto.builder()
                 .id(healthScore.getId())
                 .computerId(computer.getId())
                 .hostname(computer.getHostname())
@@ -110,24 +111,33 @@ public class HealthScoreEngineImpl implements HealthScoreEngine {
                 .category(healthScore.getCategory().name())
                 .calculatedAt(healthScore.getCalculatedAt())
                 .build();
+
+        latestHealthScoreCache.put(computer.getId(), dto);
+        return dto;
     }
 
     @Override
     @Transactional(readOnly = true)
     public HealthScoreDto getLatestHealthScore(String computerId) {
+        if (computerId != null && latestHealthScoreCache.containsKey(computerId)) {
+            return latestHealthScoreCache.get(computerId);
+        }
+
         HealthScore score = healthScoreRepository.findLatestByComputerId(computerId)
                 .orElse(null);
 
         if (score == null) {
-            return HealthScoreDto.builder()
+            HealthScoreDto defaultScore = HealthScoreDto.builder()
                     .computerId(computerId)
                     .overallScore(100.0)
                     .category(HealthCategory.Healthy.name())
                     .calculatedAt(Instant.now())
                     .build();
+            if (computerId != null) latestHealthScoreCache.put(computerId, defaultScore);
+            return defaultScore;
         }
 
-        return HealthScoreDto.builder()
+        HealthScoreDto dto = HealthScoreDto.builder()
                 .id(score.getId())
                 .computerId(computerId)
                 .hostname(score.getComputer().getHostname())
@@ -139,5 +149,8 @@ public class HealthScoreEngineImpl implements HealthScoreEngine {
                 .category(score.getCategory().name())
                 .calculatedAt(score.getCalculatedAt())
                 .build();
+
+        if (computerId != null) latestHealthScoreCache.put(computerId, dto);
+        return dto;
     }
 }

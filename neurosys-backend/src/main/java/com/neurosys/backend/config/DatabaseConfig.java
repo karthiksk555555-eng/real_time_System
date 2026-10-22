@@ -120,6 +120,24 @@ public class DatabaseConfig {
 
         config.setInitializationFailTimeout(-1);
         config.setConnectionTimeout(10000);
+        config.setMinimumIdle(5);
+        config.setMaximumPoolSize(15);
+        config.setKeepaliveTime(30000); // 30s ping keeps remote cloud connection warm & prevents drops
+        config.setIdleTimeout(300000);  // 5m idle timeout
+        config.setMaxLifetime(600000);  // 10m max connection lifetime
+
+        // High-performance MySQL Driver properties to minimize cross-network round trips
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
+        config.addDataSourceProperty("useServerPrepStmts", "true");
+        config.addDataSourceProperty("useLocalSessionState", "true");
+        config.addDataSourceProperty("rewriteBatchedStatements", "true");
+        config.addDataSourceProperty("cacheResultSetMetadata", "true");
+        config.addDataSourceProperty("cacheServerConfiguration", "true");
+        config.addDataSourceProperty("elideSetAutoCommits", "true");
+        config.addDataSourceProperty("maintainTimeStats", "false");
+
         return new HikariDataSource(config);
     }
 }

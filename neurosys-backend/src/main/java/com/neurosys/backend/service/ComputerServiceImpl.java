@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 
 import com.neurosys.backend.dto.response.SystemMetricDto;
+import com.neurosys.backend.dto.response.HealthScoreDto;
 
 @Service
 @RequiredArgsConstructor
@@ -24,14 +25,13 @@ public class ComputerServiceImpl implements ComputerService {
 
     private final ComputerRepository computerRepository;
     private final SystemMetricRepository systemMetricRepository;
-    private final HealthScoreRepository healthScoreRepository;
+    private final HealthScoreEngine healthScoreEngine;
     private final SystemMetricsService systemMetricsService;
 
     @Override
     @Transactional(readOnly = true)
     public List<ComputerDto> getAllComputers() {
-        return computerRepository.findAll().stream()
-                .filter(c -> c.getStatus() != ComputerStatus.PENDING && c.getStatus() != ComputerStatus.REJECTED)
+        return computerRepository.findAllApprovedWithLab().stream()
                 .map(this::mapToDto).toList();
     }
 
@@ -69,8 +69,7 @@ public class ComputerServiceImpl implements ComputerService {
         if (labId == null || labId.isEmpty() || "ALL".equalsIgnoreCase(labId)) {
             return getAllComputers();
         }
-        return computerRepository.findByLabId(labId).stream()
-                .filter(c -> c.getStatus() != ComputerStatus.PENDING && c.getStatus() != ComputerStatus.REJECTED)
+        return computerRepository.findByLabIdWithLab(labId).stream()
                 .map(this::mapToDto).toList();
     }
 
@@ -105,7 +104,7 @@ public class ComputerServiceImpl implements ComputerService {
 
     private ComputerDto mapToDto(Computer computer) {
         SystemMetricDto metric = systemMetricsService.getLatestMetric(computer.getId());
-        HealthScore healthScore = healthScoreRepository.findLatestByComputerId(computer.getId()).orElse(null);
+        HealthScoreDto healthScore = healthScoreEngine.getLatestHealthScore(computer.getId());
 
         boolean isLive = computer.getStatus() == ComputerStatus.ONLINE 
                 || computer.getStatus() == ComputerStatus.WARNING 

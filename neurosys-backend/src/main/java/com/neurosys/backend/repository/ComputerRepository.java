@@ -26,4 +26,10 @@ public interface ComputerRepository extends JpaRepository<Computer, String> {
 
     @Query("SELECT c FROM Computer c WHERE c.status = 'ONLINE' AND c.lastSeenAt < :threshold")
     List<Computer> findStaleOnlineComputers(Instant threshold);
+
+    @Query("SELECT c FROM Computer c LEFT JOIN FETCH c.lab WHERE c.status NOT IN ('PENDING', 'REJECTED')")
+    List<Computer> findAllApprovedWithLab();
+
+    @Query("SELECT c FROM Computer c LEFT JOIN FETCH c.lab WHERE c.lab.id = :labId AND c.status NOT IN ('PENDING', 'REJECTED')")
+    List<Computer> findByLabIdWithLab(@org.springframework.data.repository.query.Param("labId") String labId);
 }
