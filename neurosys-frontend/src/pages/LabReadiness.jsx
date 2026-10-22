@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  Lock,
   X,
   Send,
   Info,
@@ -35,7 +34,6 @@ const LabReadiness = () => {
   const [loading, setLoading] = useState(true);
   const [isRechecking, setIsRechecking] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [examModeNotice, setExamModeNotice] = useState(false);
 
   // Add Requirement Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -336,30 +334,12 @@ const LabReadiness = () => {
             <RefreshCw className={`w-4 h-4 ${isRechecking ? 'animate-spin text-primary' : ''}`} />
             <span>{isRechecking ? 'Checking computers...' : 'Recheck Readiness'}</span>
           </button>
-
-          <button
-            onClick={() => setExamModeNotice(!examModeNotice)}
-            className="px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2.5 bg-primary hover:bg-primary-container text-white shadow-md transition-all active:scale-95 cursor-pointer"
-          >
-            <Lock className="w-4 h-4" />
-            <span>Deploy Exam Lockdown Mode</span>
-          </button>
         </div>
       </div>
 
       {statusMessage && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold animate-fade-in-up">
           ✓ {statusMessage}
-        </div>
-      )}
-
-      {examModeNotice && (
-        <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs font-bold flex items-center justify-between animate-fade-in-up">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-amber-700 shrink-0" />
-            <span>Exam Lockdown Mode — Feature configured for administrator deployment.</span>
-          </div>
-          <button onClick={() => setExamModeNotice(false)} className="text-slate-600 hover:text-slate-900 text-xs font-bold">Close</button>
         </div>
       )}
 

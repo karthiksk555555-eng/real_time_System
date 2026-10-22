@@ -16,4 +16,5 @@ public interface LabService {
     List<LabEnrollmentCodeDto> getEnrollmentCodesForLab(String labId);
     ComputerDto assignComputerToLab(String computerId, String labId);
     List<ComputerDto> getUnassignedComputers();
+    void deleteLab(String id);
 }

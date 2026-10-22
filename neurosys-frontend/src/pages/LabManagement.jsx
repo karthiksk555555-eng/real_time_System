@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLab } from '../contexts/LabContext';
 import { metricsService } from '../services/metricsService';
-import { Building2, Plus, Laptop, RefreshCw, AlertCircle, Check } from 'lucide-react';
+import { Building2, Plus, Laptop, RefreshCw, AlertCircle, Check, Trash2 } from 'lucide-react';
 
 const LabManagement = () => {
   const { labs, refreshLabs } = useLab();
@@ -17,6 +17,29 @@ const LabManagement = () => {
   const [newDescription, setNewDescription] = useState('');
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
+
+  const handleDeleteLab = async (labId, labName) => {
+    if (!window.confirm(`Are you sure you want to delete lab "${labName}"? Any workstations assigned to this lab will become unassigned.`)) {
+      return;
+    }
+    try {
+      setLoading(true);
+      setFormError('');
+      setFormSuccess('');
+      const res = await metricsService.deleteLab(labId);
+      if (res?.success === false) {
+        setFormError(res?.message || 'Failed to delete lab.');
+        return;
+      }
+      setFormSuccess(`✓ Lab "${labName}" deleted successfully!`);
+      await refreshLabs();
+      await fetchUnassigned();
+    } catch (err) {
+      setFormError(err.message || 'Failed to delete lab.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchUnassigned();
@@ -42,7 +65,7 @@ const LabManagement = () => {
       setTimeout(() => setRefreshSuccess(false), 3000);
     } catch (e) {
       console.error('Error refreshing data', e);
-    } flex: {
+    } finally {
       setIsRefreshing(false);
     }
   };
@@ -238,7 +261,7 @@ const LabManagement = () => {
               {labs.map((lab) => (
                 <div
                   key={lab.id}
-                  className="p-4 bg-surface-container-low rounded-xl border border-outline-variant flex items-center justify-between gap-4"
+                  className="p-4 bg-surface-container-low rounded-xl border border-outline-variant flex items-center justify-between gap-4 group"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -251,6 +274,15 @@ const LabManagement = () => {
                       📍 {lab.location || 'College Campus'} • 💻 {lab.totalComputers || 0} Workstations
                     </p>
                   </div>
+
+                  <button
+                    onClick={() => handleDeleteLab(lab.id, lab.name)}
+                    disabled={loading}
+                    title={`Delete ${lab.name}`}
+                    className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-200 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               ))}
             </div>

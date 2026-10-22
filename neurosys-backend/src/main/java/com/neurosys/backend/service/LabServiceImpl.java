@@ -10,9 +10,11 @@ import com.neurosys.backend.entity.Lab;
 import com.neurosys.backend.entity.LabEnrollmentCode;
 import com.neurosys.backend.enums.ComputerStatus;
 import com.neurosys.backend.exception.ResourceNotFoundException;
+import com.neurosys.backend.entity.SoftwareDeployment;
 import com.neurosys.backend.repository.ComputerRepository;
 import com.neurosys.backend.repository.LabEnrollmentCodeRepository;
 import com.neurosys.backend.repository.LabRepository;
+import com.neurosys.backend.repository.SoftwareDeploymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +34,7 @@ public class LabServiceImpl implements LabService {
     private final LabEnrollmentCodeRepository enrollmentCodeRepository;
     private final ComputerRepository computerRepository;
     private final ComputerService computerService;
+    private final SoftwareDeploymentRepository softwareDeploymentRepository;
 
     private static final String ALPHANUMERIC = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     private final SecureRandom random = new SecureRandom();
@@ -142,6 +145,39 @@ public class LabServiceImpl implements LabService {
         return computerRepository.findByLabIsNull().stream()
                 .map(computer -> computerService.getComputerById(computer.getId()))
                 .toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteLab(String id) {
+        Lab lab = labRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Lab", "id", id));
+
+        // 1. Clean up any software deployment tasks targeting this lab
+        List<SoftwareDeployment> deployments = softwareDeploymentRepository.findByLabIdOrderByCreatedAtDesc(id);
+        if (deployments != null && !deployments.isEmpty()) {
+            softwareDeploymentRepository.deleteAll(deployments);
+        }
+
+        // 2. Clean up any enrollment codes generated for this lab
+        List<LabEnrollmentCode> codes = enrollmentCodeRepository.findByLabId(id);
+        if (codes != null && !codes.isEmpty()) {
+            enrollmentCodeRepository.deleteAll(codes);
+        }
+
+        // 3. Unassign all computers currently assigned to this lab
+        List<Computer> computers = computerRepository.findByLabId(id);
+        if (computers != null && !computers.isEmpty()) {
+            for (Computer c : computers) {
+                c.setLab(null);
+                c.setLabName(null);
+            }
+            computerRepository.saveAll(computers);
+        }
+
+        // 4. Delete the lab entity
+        labRepository.delete(lab);
+        log.info("[INFO] Lab {} (ID={}) deleted successfully. Unassigned {} computers.", lab.getName(), id, computers != null ? computers.size() : 0);
     }
 
     private String generateRandomCode(String labCode) {

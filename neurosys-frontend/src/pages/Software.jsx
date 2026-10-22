@@ -8,7 +8,6 @@ import {
   Search, 
   CheckCircle2, 
   AlertTriangle, 
-  Download, 
   RefreshCw,
   X,
   Send,
@@ -282,16 +281,6 @@ const Software = () => {
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-primary' : ''}`} />
             <span>Refresh Inventory</span>
           </button>
-
-          <a
-            href="https://realtmesystemmonitoring-production.up.railway.app/downloads/NeuroSys-Agent.jar"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-2.5 bg-primary hover:bg-primary-container text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition-transform active:scale-95 cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            <span>Download Agent (.jar)</span>
-          </a>
         </div>
       </div>
 

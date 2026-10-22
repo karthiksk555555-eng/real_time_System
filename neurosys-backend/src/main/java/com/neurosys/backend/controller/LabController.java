@@ -79,4 +79,11 @@ public class LabController {
         ComputerDto updated = labService.assignComputerToLab(computerId, labId);
         return ResponseEntity.ok(ApiResponse.success("Computer workstation assigned to lab successfully", updated));
     }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete Computer Lab", description = "Delete a computer lab by ID, unassigning any connected workstations")
+    public ResponseEntity<ApiResponse<Void>> deleteLab(@PathVariable String id) {
+        labService.deleteLab(id);
+        return ResponseEntity.ok(ApiResponse.success("Computer Lab deleted successfully", null));
+    }
 }

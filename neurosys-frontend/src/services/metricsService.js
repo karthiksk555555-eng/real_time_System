@@ -83,6 +83,7 @@ export const metricsService = {
   getComputersByLabId: async (labId) => fetchRealApi(`/computers?labId=${labId}`),
   approveComputer: async (id) => api.put(`/computers/${id}/approve`),
   rejectComputer: async (id) => api.put(`/computers/${id}/reject`),
+  deleteLab: async (id) => fetchRealApi(`/labs/${id}`, { method: 'DELETE' }),
 
   // Telemetry History & Metrics APIs
   getMetricHistory: async (id, limit = 30) => fetchRealApi(`/agent/metrics/history/${id}?limit=${limit}`),

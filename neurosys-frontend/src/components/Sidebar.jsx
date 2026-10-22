@@ -35,7 +35,7 @@ const Sidebar = ({ mobileNavOpen, setMobileNavOpen }) => {
   const navItems = [
     { name: 'Overview', path: '/dashboard', icon: 'dashboard' },
     { name: 'Laboratories', path: '/labs', icon: 'meeting_room' },
-    { name: 'My Laptop (PALBUQS2)', path: '/admin-laptop', icon: 'laptop_mac', highlight: true },
+    { name: 'My Laptop', path: '/admin-laptop', icon: 'laptop_mac', highlight: true },
     { name: 'Computers', path: '/computers', icon: 'desktop_windows' },
     { name: 'Alerts', path: '/alerts', icon: 'warning', badge: activeAlertCount },
     { name: 'Software Inventory', path: '/software', icon: 'inventory_2' },

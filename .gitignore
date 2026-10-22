@@ -23,6 +23,8 @@ desktop.ini
 # Agent Local Machine State & Cache
 agent_id.txt
 **/agent_id.txt
+cache/
+**/cache/
 neurosys-agent/cache/
 neurosys-agent/logs/
 **/logs/

@@ -10,5 +10,6 @@ import java.util.Optional;
 @Repository
 public interface LabEnrollmentCodeRepository extends JpaRepository<LabEnrollmentCode, String> {
     Optional<LabEnrollmentCode> findByCodeIgnoreCase(String code);
+    List<LabEnrollmentCode> findByLabId(String labId);
     List<LabEnrollmentCode> findByLabIdOrderByCreatedAtDesc(String labId);
 }
