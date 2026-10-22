@@ -39,8 +39,21 @@ const Computers = () => {
   const [searchParams] = useSearchParams();
   const statusParam = searchParams.get('status');
 
-  const [computers, setComputers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [computers, setComputers] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('neurosys_computers_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('neurosys_computers_cache');
+    } catch (e) {
+      return true;
+    }
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Filters
@@ -98,8 +111,11 @@ const Computers = () => {
     try {
       const data = await metricsService.getAllComputers(currentLab?.id);
       const compList = Array.isArray(data) ? data : (data?.data || []);
-      if (Array.isArray(compList)) {
+      if (Array.isArray(compList) && compList.length > 0) {
         setComputers([...compList]);
+        try {
+          sessionStorage.setItem('neurosys_computers_cache', JSON.stringify(compList));
+        } catch (e) {}
       }
     } catch (e) {
       console.error('Failed to fetch computer lab workstations', e);

@@ -28,11 +28,23 @@ public class ComputerServiceImpl implements ComputerService {
     private final HealthScoreEngine healthScoreEngine;
     private final SystemMetricsService systemMetricsService;
 
+    private volatile List<ComputerDto> cachedApprovedComputers = null;
+    private volatile long lastAllComputersCacheTime = 0L;
+
     @Override
     @Transactional(readOnly = true)
     public List<ComputerDto> getAllComputers() {
-        return computerRepository.findAllApprovedWithLab().stream()
+        long now = System.currentTimeMillis();
+        List<ComputerDto> cache = cachedApprovedComputers;
+        if (cache != null && (now - lastAllComputersCacheTime < 2000L)) {
+            return cache;
+        }
+
+        List<ComputerDto> fresh = computerRepository.findAllApprovedWithLab().stream()
                 .map(this::mapToDto).toList();
+        cachedApprovedComputers = fresh;
+        lastAllComputersCacheTime = now;
+        return fresh;
     }
 
     @Override

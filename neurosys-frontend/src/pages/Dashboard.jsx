@@ -21,11 +21,24 @@ import {
 const Dashboard = () => {
   const navigate = useNavigate();
   const { currentLab } = useLab();
-  const [computers, setComputers] = useState([]);
+  const [computers, setComputers] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('neurosys_computers_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [alerts, setAlerts] = useState([]);
   const [readinessData, setReadinessData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState('Just now');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('neurosys_computers_cache');
+    } catch (e) {
+      return true;
+    }
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
@@ -80,8 +93,11 @@ const Dashboard = () => {
       const compList = Array.isArray(compData) ? compData : (compData?.data || []);
       const alertList = Array.isArray(alertData) ? alertData : (alertData?.data || []);
 
-      if (Array.isArray(compList)) {
+      if (Array.isArray(compList) && compList.length > 0) {
         setComputers(compList);
+        try {
+          sessionStorage.setItem('neurosys_computers_cache', JSON.stringify(compList));
+        } catch (e) {}
       }
 
       setAlerts(Array.isArray(alertList) ? alertList : []);
