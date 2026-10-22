@@ -117,12 +117,12 @@ public class ComputerServiceImpl implements ComputerService {
         double speedMbps = Math.round((totalBytesSec * 8.0 / 1_000_000.0) * 100.0) / 100.0;
 
         Double cpu = isLive 
-                ? (computer.getLastCpuUsage() != null ? computer.getLastCpuUsage() : (metric != null ? metric.getCpuUsagePercent() : 0.0))
+                ? (metric != null && metric.getCpuUsagePercent() != null ? metric.getCpuUsagePercent() : (computer.getLastCpuUsage() != null ? computer.getLastCpuUsage() : 0.0))
                 : null;
         Double ram = isLive 
-                ? (computer.getLastRamUsage() != null ? computer.getLastRamUsage() : (metric != null ? metric.getMemoryUsagePercent() : 0.0))
+                ? (metric != null && metric.getMemoryUsagePercent() != null ? metric.getMemoryUsagePercent() : (computer.getLastRamUsage() != null ? computer.getLastRamUsage() : 0.0))
                 : null;
-        Double disk = metric != null ? metric.getDiskUsagePercent() : (computer.getLastDiskUsage() != null ? computer.getLastDiskUsage() : 0.0);
+        Double disk = metric != null && metric.getDiskUsagePercent() != null ? metric.getDiskUsagePercent() : (computer.getLastDiskUsage() != null ? computer.getLastDiskUsage() : 0.0);
 
         return ComputerDto.builder()
                 .id(computer.getId())
