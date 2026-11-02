@@ -96,18 +96,20 @@ public class DeploymentCommandHandler {
         String silentArguments = (String) task.get("silentArguments");
         String expectedChecksum = (String) task.get("checksum");
 
-        log.info("Processing deployment task [{}] for package '{}' (Version: {})", deploymentNumber, packageName, packageVersion);
+        String cleanAppName = extractCleanAppName(packageName, installerUrl);
+        log.info("Processing deployment task [{}] for package '{}' [Clean Name: '{}'] (Version: {})",
+                deploymentNumber, packageName, cleanAppName, packageVersion);
 
         // Step 1: Check if already installed
         List<Map<String, String>> installedList = softwareCollector.collectInstalledSoftware();
         boolean alreadyInstalled = installedList.stream().anyMatch(item -> {
             String name = item.get("name");
-            return name != null && isNameMatch(name, packageName);
+            return name != null && isNameMatch(name, cleanAppName);
         });
 
         if (alreadyInstalled) {
-            log.info("Package '{}' is ALREADY_INSTALLED on this machine.", packageName);
-            updateStatusAsync(deploymentId, "ALREADY_INSTALLED", "Package " + packageName + " is already installed on target machine");
+            log.info("Package '{}' ({}) is ALREADY_INSTALLED on this machine.", packageName, cleanAppName);
+            updateStatusAsync(deploymentId, "ALREADY_INSTALLED", "Package " + cleanAppName + " is already installed on target machine");
             return;
         }
 
@@ -216,6 +218,18 @@ public class DeploymentCommandHandler {
                         metricsSender.sendSoftwarePayload(AgentConfig.getAgentId(), systemInfoCollector.getHostname(), freshSoftware);
                     } catch (Exception ignored) {}
                 });
+            } else if (exitCode == 1638 || exitCode == 1603 || exitCode == 2) {
+                // If installer exited with 1638 (another version already installed) or 1603 (downgrade refused / existing install)
+                boolean nowPresent = softwareCollector.collectInstalledSoftware().stream().anyMatch(item -> {
+                    String name = item.get("name");
+                    return name != null && isNameMatch(name, cleanAppName);
+                });
+                if (nowPresent) {
+                    updateStatusAsync(deploymentId, "ALREADY_INSTALLED", "Application " + cleanAppName + " is already installed on target machine");
+                    log.info("Deployment [{}] for package '{}' marked as ALREADY_INSTALLED after exit code {}", deploymentNumber, packageName, exitCode);
+                } else {
+                    updateStatusAsync(deploymentId, "FAILED", "Installer failed with exit code " + exitCode);
+                }
             } else {
                 updateStatusAsync(deploymentId, "FAILED", "Installer failed with exit code " + exitCode);
             }
@@ -363,20 +377,52 @@ public class DeploymentCommandHandler {
         return best;
     }
 
+    private String extractCleanAppName(String packageName, String installerUrl) {
+        if (packageName == null || packageName.isBlank()) {
+            if (installerUrl != null && installerUrl.contains("/")) {
+                packageName = installerUrl.substring(installerUrl.lastIndexOf('/') + 1);
+            } else {
+                packageName = "App";
+            }
+        }
+        String name = packageName.trim();
+        if (name.startsWith("Direct Application (") && name.endsWith(")")) {
+            name = name.substring("Direct Application (".length(), name.length() - 1);
+        } else if (name.startsWith("Direct Installer (") && name.endsWith(")")) {
+            name = name.substring("Direct Installer (".length(), name.length() - 1);
+        }
+        if (name.contains("?")) {
+            name = name.substring(0, name.indexOf('?'));
+        }
+        name = name.replaceAll("(?i)\\.(msi|exe|zip|7z)$", "");
+        name = name.replaceAll("(?i)[-_]?(x64|x86|win64|win32|setup|installer|amd64|standalone)", "");
+        name = name.replaceAll("(?i)[-_.]v?\\d+(\\.\\d+)*.*$", "");
+        name = name.trim();
+        return name.isEmpty() ? "App" : name;
+    }
+
     private boolean isNameMatch(String installedName, String targetName) {
         if (installedName == null || targetName == null) return false;
         String a = installedName.toLowerCase().trim();
         String b = targetName.toLowerCase().trim();
 
-        // Custom / direct link installs should NEVER be skipped by loose substring matches
-        if (b.startsWith("direct application") || b.startsWith("direct installer") || b.startsWith("custom") || b.isEmpty()) {
-            return false;
-        }
+        if (b.isEmpty() || a.isEmpty()) return false;
 
         // Exact match
         if (a.equals(b)) return true;
 
-        // If target name is clean (e.g. "Google Chrome", "VLC Media Player"), check if installedName equals or starts with it
+        // Common software name aliases
+        if ((b.equals("node") || b.equals("nodejs")) && (a.equals("node.js") || a.startsWith("node.js") || a.contains("node.js"))) return true;
+        if (b.equals("minecraft") && a.contains("minecraft")) return true;
+        if (b.equals("vlc") && (a.contains("vlc") || a.contains("videolan"))) return true;
+        if (b.equals("git") && (a.equals("git") || a.startsWith("git for windows") || a.startsWith("git version"))) return true;
+        if (b.equals("everything") && a.contains("everything")) return true;
+        if (b.equals("chrome") && a.contains("chrome")) return true;
+        if ((b.equals("vscode") || b.equals("code")) && a.contains("visual studio code")) return true;
+        if (b.equals("python") && a.startsWith("python")) return true;
+        if ((b.equals("7zip") || b.equals("7-zip") || b.equals("7z")) && a.contains("7-zip")) return true;
+
+        // Word boundary match if targetName is at least 4 letters
         if (b.length() >= 4 && (a.startsWith(b) || a.matches(".*\\b" + Pattern.quote(b) + "\\b.*"))) {
             return true;
         }
