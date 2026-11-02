@@ -108,19 +108,27 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
             throw new IllegalArgumentException("Either select a software package or provide a direct installer download link.");
         }
 
-        Lab lab = labRepository.findById(request.getLabId())
-                .orElseThrow(() -> new ResourceNotFoundException("Lab", "id", request.getLabId()));
+        Lab lab;
+        if (request.getLabId() == null || "ALL".equalsIgnoreCase(request.getLabId())) {
+            lab = labRepository.findAll().stream().findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException("Lab", "id", request.getLabId() != null ? request.getLabId() : "ALL"));
+        } else {
+            lab = labRepository.findById(request.getLabId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Lab", "id", request.getLabId()));
+        }
 
         List<Computer> targetComputers;
         if (request.getComputerIds() != null && !request.getComputerIds().isEmpty()) {
             targetComputers = computerRepository.findAllById(request.getComputerIds()).stream()
-                    .filter(c -> c.getLab() != null && c.getLab().getId().equals(lab.getId()))
                     .filter(c -> c.getStatus() != ComputerStatus.REJECTED)
                     .collect(Collectors.toList());
         } else {
             targetComputers = computerRepository.findByLabId(lab.getId()).stream()
                     .filter(c -> c.getStatus() != ComputerStatus.REJECTED)
                     .collect(Collectors.toList());
+            if (targetComputers.isEmpty() && "ALL".equalsIgnoreCase(request.getLabId())) {
+                targetComputers = computerRepository.findAllApprovedWithLab();
+            }
         }
 
         if (targetComputers.isEmpty()) {

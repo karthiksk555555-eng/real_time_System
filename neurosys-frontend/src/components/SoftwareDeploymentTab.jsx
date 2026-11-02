@@ -30,7 +30,9 @@ const SoftwareDeploymentTab = () => {
   const [labComputers, setLabComputers] = useState([]);
   
   const [selectedPackageId, setSelectedPackageId] = useState('');
-  const [selectedLabId, setSelectedLabId] = useState(currentLab?.id || '');
+  const [selectedLabId, setSelectedLabId] = useState(
+    currentLab?.id && currentLab.id !== 'ALL' ? currentLab.id : ''
+  );
   const [selectedComputerIds, setSelectedComputerIds] = useState([]);
   const [expirationHours, setExpirationHours] = useState(24);
 
@@ -57,11 +59,16 @@ const SoftwareDeploymentTab = () => {
   const [directUrl, setDirectUrl] = useState('');
   const [directAppName, setDirectAppName] = useState('');
 
+  // Keep selectedLabId in sync with valid lab (never allow 'ALL' as deployment target)
   useEffect(() => {
-    if (currentLab?.id) {
-      setSelectedLabId(currentLab.id);
+    if (labs && labs.length > 0) {
+      if (currentLab?.id && currentLab.id !== 'ALL') {
+        setSelectedLabId(currentLab.id);
+      } else if (!selectedLabId || selectedLabId === 'ALL') {
+        setSelectedLabId(labs[0].id);
+      }
     }
-  }, [currentLab?.id]);
+  }, [currentLab?.id, labs]);
 
   useEffect(() => {
     loadData();
@@ -147,14 +154,24 @@ const SoftwareDeploymentTab = () => {
   };
 
   const handleCreateDeployment = async () => {
-    if (!selectedLabId) {
-      setErrorMsg('Please select target lab.');
-      return;
+    let targetLab = selectedLabId;
+    if (!targetLab || targetLab === 'ALL') {
+      if (labs && labs.length > 0) {
+        targetLab = labs[0].id;
+      } else {
+        setErrorMsg('Please select a target lab.');
+        return;
+      }
     }
 
     if (selectedPackageId === 'CUSTOM_LINK') {
       if (!directUrl || !directUrl.trim()) {
         setErrorMsg('Please enter the direct installer download URL.');
+        return;
+      }
+      const trimmedUrl = directUrl.trim();
+      if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+        setErrorMsg('Please enter a valid URL starting with http:// or https://');
         return;
       }
     } else if (!selectedPackageId) {
@@ -171,15 +188,15 @@ const SoftwareDeploymentTab = () => {
       if (selectedPackageId === 'CUSTOM_LINK') {
         reqPayload = {
           customInstallerUrl: directUrl.trim(),
-          customAppName: directAppName.trim() || 'Direct Installer App',
-          labId: selectedLabId,
+          customAppName: directAppName.trim() || undefined,
+          labId: targetLab,
           computerIds: selectedComputerIds.length > 0 ? selectedComputerIds : null,
           expirationHours: Number(expirationHours) || 24
         };
       } else {
         reqPayload = {
           softwarePackageId: selectedPackageId,
-          labId: selectedLabId,
+          labId: targetLab,
           computerIds: selectedComputerIds.length > 0 ? selectedComputerIds : null,
           expirationHours: Number(expirationHours) || 24
         };
@@ -560,7 +577,11 @@ const SoftwareDeploymentTab = () => {
         <div className="flex justify-end pt-2">
           <button
             onClick={() => setConfirmModalOpen(true)}
-            disabled={submitting || !selectedPackageId || labComputers.length === 0}
+            disabled={
+              submitting ||
+              (selectedPackageId === 'CUSTOM_LINK' ? !directUrl.trim() : !selectedPackageId) ||
+              labComputers.length === 0
+            }
             className="px-6 py-3 bg-primary hover:bg-primary-container text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
           >
             <Rocket className="w-4 h-4" />
@@ -586,11 +607,19 @@ const SoftwareDeploymentTab = () => {
             <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800">
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-600">Software Package:</span>
-                <strong className="text-primary font-extrabold">{activePkg?.name} v{activePkg?.version}</strong>
+                <strong className="text-primary font-extrabold">
+                  {selectedPackageId === 'CUSTOM_LINK'
+                    ? (directAppName.trim() || 'Direct Installer Link')
+                    : `${activePkg?.name} v${activePkg?.version}`}
+                </strong>
               </div>
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-600">Installer Type &amp; Url:</span>
-                <span className="font-mono text-slate-900 font-bold">{activePkg?.installerType}</span>
+                <span className="font-mono text-slate-900 font-bold truncate max-w-xs" title={selectedPackageId === 'CUSTOM_LINK' ? directUrl : activePkg?.installerUrl}>
+                  {selectedPackageId === 'CUSTOM_LINK'
+                    ? `${directUrl.toLowerCase().includes('.msi') ? 'MSI' : 'EXE'} (${directUrl})`
+                    : `${activePkg?.installerType} (${activePkg?.installerUrl})`}
+                </span>
               </div>
               <div className="flex justify-between border-b border-slate-200 pb-2">
                 <span className="text-slate-600">Target Lab:</span>

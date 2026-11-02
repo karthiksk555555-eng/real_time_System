@@ -69,7 +69,7 @@ public class DeploymentCommandHandler {
                 }
             }
         } catch (Exception e) {
-            // Quiet exception fallback during network polling
+            log.debug("Error during deployment polling: {}", e.getMessage());
         }
     }
 
@@ -113,12 +113,15 @@ public class DeploymentCommandHandler {
         updateStatusAsync(deploymentId, "DOWNLOADING", "Downloading installer package from " + installerUrl);
         File tempInstaller = null;
         try {
-            String ext = "MSI".equalsIgnoreCase(installerType) ? ".msi" : ".exe";
+            boolean isMsi = "MSI".equalsIgnoreCase(installerType) || (installerUrl != null && installerUrl.toLowerCase().contains(".msi"));
+            String ext = isMsi ? ".msi" : ".exe";
             tempInstaller = File.createTempFile("neurosys-installer-", ext);
             tempInstaller.deleteOnExit();
 
             HttpRequest downloadReq = HttpRequest.newBuilder()
                     .uri(URI.create(installerUrl))
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .timeout(Duration.ofMinutes(10))
                     .GET()
                     .build();
 
@@ -153,7 +156,7 @@ public class DeploymentCommandHandler {
 
             ProcessBuilder pb;
             List<String> command = new ArrayList<>();
-            if ("MSI".equalsIgnoreCase(installerType)) {
+            if (isMsi) {
                 command.add("msiexec.exe");
                 command.add("/i");
                 command.add(tempInstaller.getAbsolutePath());
@@ -313,9 +316,23 @@ public class DeploymentCommandHandler {
 
     private boolean isNameMatch(String installedName, String targetName) {
         if (installedName == null || targetName == null) return false;
-        String a = installedName.toLowerCase();
-        String b = targetName.toLowerCase();
-        return a.contains(b) || b.contains(a);
+        String a = installedName.toLowerCase().trim();
+        String b = targetName.toLowerCase().trim();
+
+        // Custom / direct link installs should NEVER be skipped by loose substring matches
+        if (b.startsWith("direct application") || b.startsWith("direct installer") || b.startsWith("custom") || b.isEmpty()) {
+            return false;
+        }
+
+        // Exact match
+        if (a.equals(b)) return true;
+
+        // If target name is clean (e.g. "Google Chrome", "VLC Media Player"), check if installedName equals or starts with it
+        if (b.length() >= 4 && (a.startsWith(b) || a.matches(".*\\b" + Pattern.quote(b) + "\\b.*"))) {
+            return true;
+        }
+
+        return false;
     }
 
     private String calculateSHA256(File file) {
@@ -351,8 +368,8 @@ public class DeploymentCommandHandler {
                         .PUT(HttpRequest.BodyPublishers.ofString(jsonBody))
                         .build();
 
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                log.info("Reported deployment [{}] status: {} ({})", deploymentId, status, statusDetail);
+                HttpResponse<String> resp = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                log.info("Reported deployment [{}] status: {} ({}) [HTTP {}]", deploymentId, status, statusDetail, resp.statusCode());
             } catch (Exception e) {
                 log.error("Failed to report deployment status to server", e);
             }
