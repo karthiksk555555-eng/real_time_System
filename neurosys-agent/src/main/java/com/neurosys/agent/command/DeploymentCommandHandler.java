@@ -177,6 +177,10 @@ public class DeploymentCommandHandler {
                 if (!finalArgs.isBlank()) {
                     command.addAll(Arrays.asList(finalArgs.trim().split("\\s+")));
                 }
+                if (!finalArgs.contains("MSIINSTALLPERUSER")) {
+                    command.add("ALLUSERS=2");
+                    command.add("MSIINSTALLPERUSER=1");
+                }
             } else {
                 command.add(tempInstaller.getAbsolutePath());
                 if (!finalArgs.isBlank()) {
@@ -237,7 +241,7 @@ public class DeploymentCommandHandler {
             return configuredArgs.trim();
         }
         if (isMsi) {
-            return "/qn /norestart";
+            return "/qn /norestart ALLUSERS=2 MSIINSTALLPERUSER=1";
         }
         try (InputStream is = Files.newInputStream(installerFile.toPath())) {
             byte[] buffer = new byte[Math.min((int) installerFile.length(), 1024 * 512)];
