@@ -58,6 +58,7 @@ const SoftwareDeploymentTab = () => {
   // Instant Direct Link Deploy State
   const [directUrl, setDirectUrl] = useState('');
   const [directAppName, setDirectAppName] = useState('');
+  const [directSilentArgs, setDirectSilentArgs] = useState('');
 
   // Keep selectedLabId in sync with valid lab (never allow 'ALL' as deployment target)
   useEffect(() => {
@@ -189,6 +190,7 @@ const SoftwareDeploymentTab = () => {
         reqPayload = {
           customInstallerUrl: directUrl.trim(),
           customAppName: directAppName.trim() || undefined,
+          customSilentArgs: directSilentArgs.trim() || undefined,
           labId: targetLab,
           computerIds: selectedComputerIds.length > 0 ? selectedComputerIds : null,
           expirationHours: Number(expirationHours) || 24
@@ -209,6 +211,7 @@ const SoftwareDeploymentTab = () => {
       if (selectedPackageId === 'CUSTOM_LINK') {
         setDirectUrl('');
         setDirectAppName('');
+        setDirectSilentArgs('');
       }
       await loadDeployments();
     } catch (err) {
@@ -464,11 +467,23 @@ const SoftwareDeploymentTab = () => {
                   <label className="font-bold text-slate-700 block">App Name (Optional)</label>
                   <input
                     type="text"
-                    placeholder="e.g. Custom Software Tool"
+                    placeholder="e.g. Minecraft Launcher"
                     value={directAppName}
                     onChange={(e) => setDirectAppName(e.target.value)}
                     className="w-full h-9 px-3 bg-white border border-blue-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:border-primary shadow-sm"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Silent Install Arguments (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="Auto-detects framework (e.g. /quiet /norestart or /S)"
+                    value={directSilentArgs}
+                    onChange={(e) => setDirectSilentArgs(e.target.value)}
+                    className="w-full h-9 px-3 bg-white border border-blue-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-none focus:border-primary shadow-sm"
+                  />
+                  <p className="text-[10px] text-slate-500 font-medium">Leave blank for smart auto-detection (WiX/Burn, Inno, NSIS, MSI).</p>
                 </div>
               </div>
             ) : activePkg && (

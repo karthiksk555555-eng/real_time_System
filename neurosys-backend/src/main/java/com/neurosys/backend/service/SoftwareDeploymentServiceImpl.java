@@ -221,9 +221,7 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
     @Transactional(readOnly = true)
     public List<AgentDeploymentTaskDto> getPendingTasksForAgent(String agentId) {
         Set<DeploymentTargetStatus> activeStatuses = Set.of(
-                DeploymentTargetStatus.PENDING,
-                DeploymentTargetStatus.DOWNLOADING,
-                DeploymentTargetStatus.INSTALLING
+                DeploymentTargetStatus.PENDING
         );
 
         List<SoftwareDeploymentTarget> targets = targetRepository.findPendingTasksForAgent(agentId, activeStatuses);

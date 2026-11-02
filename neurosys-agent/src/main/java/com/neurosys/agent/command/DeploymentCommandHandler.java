@@ -34,6 +34,7 @@ public class DeploymentCommandHandler {
     private final SoftwareCollector softwareCollector;
     private final MetricsSender metricsSender;
     private final SystemInfoCollector systemInfoCollector;
+    private final Set<String> activeDeploymentIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public DeploymentCommandHandler() {
         this.httpClient = HttpClient.newBuilder()
@@ -75,6 +76,18 @@ public class DeploymentCommandHandler {
 
     private void processTask(Map<String, Object> task) {
         String deploymentId = (String) task.get("deploymentId");
+        if (deploymentId == null || !activeDeploymentIds.add(deploymentId)) {
+            log.debug("Deployment task [{}] is already executing on this agent. Skipping concurrent poll.", deploymentId);
+            return;
+        }
+        try {
+            executeTask(task, deploymentId);
+        } finally {
+            activeDeploymentIds.remove(deploymentId);
+        }
+    }
+
+    private void executeTask(Map<String, Object> task, String deploymentId) {
         String deploymentNumber = (String) task.get("deploymentNumber");
         String packageName = (String) task.get("packageName");
         String packageVersion = (String) task.get("packageVersion");
@@ -151,8 +164,9 @@ public class DeploymentCommandHandler {
             }
 
             // Step 4: Silent Installation Execution
-            updateStatusAsync(deploymentId, "INSTALLING", "Executing silent installation...");
-            log.info("Executing silent installation for {}", packageName);
+            String finalArgs = detectOptimalSilentArgs(tempInstaller, silentArguments, isMsi);
+            updateStatusAsync(deploymentId, "INSTALLING", "Executing silent installation (" + finalArgs + ")...");
+            log.info("Executing silent installation for {} with args: '{}'", packageName, finalArgs);
 
             ProcessBuilder pb;
             List<String> command = new ArrayList<>();
@@ -160,30 +174,25 @@ public class DeploymentCommandHandler {
                 command.add("msiexec.exe");
                 command.add("/i");
                 command.add(tempInstaller.getAbsolutePath());
-                if (silentArguments != null && !silentArguments.isBlank()) {
-                    command.addAll(Arrays.asList(silentArguments.trim().split("\\s+")));
-                } else {
-                    command.add("/qn");
-                    command.add("/norestart");
+                if (!finalArgs.isBlank()) {
+                    command.addAll(Arrays.asList(finalArgs.trim().split("\\s+")));
                 }
             } else {
                 command.add(tempInstaller.getAbsolutePath());
-                if (silentArguments != null && !silentArguments.isBlank()) {
-                    command.addAll(Arrays.asList(silentArguments.trim().split("\\s+")));
-                } else {
-                    command.add("/S");
+                if (!finalArgs.isBlank()) {
+                    command.addAll(Arrays.asList(finalArgs.trim().split("\\s+")));
                 }
             }
             pb = new ProcessBuilder(command);
 
             pb.redirectErrorStream(true);
             Process process = pb.start();
-            boolean finished = process.waitFor(10, TimeUnit.MINUTES);
+            boolean finished = process.waitFor(5, TimeUnit.MINUTES);
 
             if (!finished) {
                 process.destroyForcibly();
-                log.error("Silent installer execution timed out after 10 minutes");
-                updateStatusAsync(deploymentId, "FAILED", "Installer timed out after 10 minutes");
+                log.error("Silent installer execution timed out after 5 minutes");
+                updateStatusAsync(deploymentId, "FAILED", "Installer timed out after 5 minutes");
                 return;
             }
 
@@ -217,6 +226,42 @@ public class DeploymentCommandHandler {
                 } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * Inspects the downloaded binary header to identify installer frameworks (WiX/Burn, Inno, NSIS, InstallShield)
+     * and select the appropriate silent switches.
+     */
+    private String detectOptimalSilentArgs(File installerFile, String configuredArgs, boolean isMsi) {
+        if (configuredArgs != null && !configuredArgs.isBlank() && !configuredArgs.equalsIgnoreCase("/S")) {
+            return configuredArgs.trim();
+        }
+        if (isMsi) {
+            return "/qn /norestart";
+        }
+        try (InputStream is = Files.newInputStream(installerFile.toPath())) {
+            byte[] buffer = new byte[Math.min((int) installerFile.length(), 1024 * 512)];
+            int read = is.read(buffer);
+            if (read > 0) {
+                String headerStr = new String(buffer, java.nio.charset.StandardCharsets.ISO_8859_1);
+                if (headerStr.contains("Burn") || headerStr.contains("WiX")) {
+                    log.info("[InstallerEngine] Detected WiX/Burn bootstrapper. Auto-applying arguments: /quiet /norestart");
+                    return "/quiet /norestart";
+                } else if (headerStr.contains("Inno Setup")) {
+                    log.info("[InstallerEngine] Detected Inno Setup. Auto-applying arguments: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-");
+                    return "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-";
+                } else if (headerStr.contains("Nullsoft")) {
+                    log.info("[InstallerEngine] Detected NSIS (Nullsoft). Auto-applying arguments: /S");
+                    return "/S";
+                } else if (headerStr.contains("InstallShield")) {
+                    log.info("[InstallerEngine] Detected InstallShield. Auto-applying arguments: /s /v\"/qn\"");
+                    return "/s /v\"/qn\"";
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not inspect installer header: {}", e.getMessage());
+        }
+        return (configuredArgs != null && !configuredArgs.isBlank()) ? configuredArgs.trim() : "/quiet /norestart";
     }
 
     /**
