@@ -25,8 +25,14 @@ public class AgentConfig {
         File externalProps = new File("agent.properties");
         if (externalProps.exists()) {
             try (InputStream input = Files.newInputStream(externalProps.toPath())) {
-                properties.load(input);
+                properties.load(new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8));
                 log.info("Loaded agent.properties from external file: {}", externalProps.getAbsolutePath());
+                // Handle possible UTF-8 BOM in key names
+                for (String key : properties.stringPropertyNames()) {
+                    if (key.contains("server.url")) {
+                        properties.setProperty("server.url", properties.getProperty(key));
+                    }
+                }
             } catch (Exception e) {
                 log.warn("Could not load external agent.properties file", e);
             }
@@ -126,7 +132,7 @@ public class AgentConfig {
             url = System.getProperty("server.url");
         }
         if (url == null || url.trim().isEmpty()) {
-            url = properties.getProperty("server.url", "https://realtimesystemmonitoring-production-7322.up.railway.app/api/v1");
+            url = properties.getProperty("server.url", "https://realtimesystem-production.up.railway.app/api/v1");
         }
         url = url.trim();
         while (url.endsWith("/")) {

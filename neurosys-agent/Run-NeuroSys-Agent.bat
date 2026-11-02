@@ -2,10 +2,12 @@
 title NeuroSys Cloud Monitoring Agent Daemon
 cd /d "%~dp0"
 
-set "JAVA_EXE=javaw.exe"
-if exist "%~dp0jre\bin\javaw.exe" (
-    set "JAVA_EXE=%~dp0jre\bin\javaw.exe"
-) else if exist "%~dp0jre\bin\java.exe" (
+set "NEUROSYS_SERVER_URL=https://realtimesystem-production.up.railway.app/api/v1"
+set "NEUROSYS_AGENT_ID=AGENT-9EA49A31"
+set "NEUROSYS_LAB_NAME=Computer Lab 1"
+
+set "JAVA_EXE=java.exe"
+if exist "%~dp0jre\bin\java.exe" (
     set "JAVA_EXE=%~dp0jre\bin\java.exe"
 )
 
