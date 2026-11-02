@@ -23,6 +23,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class DeploymentCommandHandler {
 
@@ -96,7 +98,18 @@ public class DeploymentCommandHandler {
             return;
         }
 
-        // Step 2: Download installer
+        // Step 2: Resolve actual download URL (smart link detection)
+        try {
+            String resolvedUrl = resolveActualDownloadUrl(installerUrl);
+            if (!resolvedUrl.equals(installerUrl)) {
+                log.info("[SmartLink] Resolved '{}' -> '{}'", installerUrl, resolvedUrl);
+                installerUrl = resolvedUrl;
+            }
+        } catch (Exception e) {
+            log.warn("[SmartLink] URL resolution failed, using original URL. Error: {}", e.getMessage());
+        }
+
+        // Step 3: Download installer
         updateStatusAsync(deploymentId, "DOWNLOADING", "Downloading installer package from " + installerUrl);
         File tempInstaller = null;
         try {
@@ -201,6 +214,101 @@ public class DeploymentCommandHandler {
                 } catch (Exception ignored) {}
             }
         }
+    }
+
+    /**
+     * Smart URL resolver: if the URL directly points to an installer file (.exe/.msi/.zip),
+     * returns it as-is. If the URL is a webpage, scans the HTML to find the actual
+     * installer download link automatically.
+     */
+    private String resolveActualDownloadUrl(String rawUrl) throws Exception {
+        // Step 1: Check if URL path already ends with a known installer extension
+        String urlPath = rawUrl.toLowerCase().split("\\?")[0];
+        if (urlPath.endsWith(".exe") || urlPath.endsWith(".msi") ||
+            urlPath.endsWith(".zip") || urlPath.endsWith(".7z") ||
+            urlPath.endsWith(".tar.gz") || urlPath.endsWith(".run")) {
+            log.info("[SmartLink] Direct file URL detected: {}", rawUrl);
+            return rawUrl;
+        }
+
+        // Step 2: Send HEAD request to check Content-Type without downloading body
+        try {
+            HttpRequest headReq = HttpRequest.newBuilder()
+                    .uri(URI.create(rawUrl))
+                    .method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+            HttpResponse<Void> headResp = httpClient.send(headReq, HttpResponse.BodyHandlers.discarding());
+            String contentType = headResp.headers().firstValue("content-type").orElse("").toLowerCase();
+
+            // If Content-Type indicates a binary/downloadable file — use it directly
+            if (contentType.contains("octet-stream") || contentType.contains("x-msdownload") ||
+                contentType.contains("x-msi") || contentType.contains("zip") ||
+                (contentType.contains("application") && !contentType.contains("html") && !contentType.contains("xml"))) {
+                log.info("[SmartLink] Content-Type '{}' is binary. Using URL directly.", contentType);
+                return rawUrl;
+            }
+            log.info("[SmartLink] Content-Type '{}' looks like a webpage. Scanning for installer links...", contentType);
+        } catch (Exception e) {
+            log.warn("[SmartLink] HEAD request failed: {}. Falling back to page scan.", e.getMessage());
+        }
+
+        // Step 3: Fetch the webpage HTML and scan anchor hrefs for installer links
+        HttpRequest pageReq = HttpRequest.newBuilder()
+                .uri(URI.create(rawUrl))
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
+        HttpResponse<String> pageResp = httpClient.send(pageReq, HttpResponse.BodyHandlers.ofString());
+        String html = pageResp.body();
+
+        // Find all href values containing installer extensions (prefer .exe > .msi > .zip > .7z)
+        Pattern hrefPattern = Pattern.compile(
+                "href=[\"']([^\"']*\\.(?:exe|msi|zip|7z)[^\"']*)[\"']",
+                Pattern.CASE_INSENSITIVE
+        );
+        Matcher matcher = hrefPattern.matcher(html);
+
+        List<String> candidates = new ArrayList<>();
+        while (matcher.find()) {
+            candidates.add(matcher.group(1));
+        }
+
+        if (candidates.isEmpty()) {
+            log.warn("[SmartLink] No installer links found on page '{}'. Using original URL.", rawUrl);
+            return rawUrl;
+        }
+
+        // Pick best candidate — prefer .exe, then .msi, then .zip
+        String[] preferredExts = {".exe", ".msi", ".zip", ".7z"};
+        String best = null;
+        outer:
+        for (String ext : preferredExts) {
+            for (String candidate : candidates) {
+                if (candidate.toLowerCase().contains(ext)) {
+                    best = candidate;
+                    break outer;
+                }
+            }
+        }
+        if (best == null) best = candidates.get(0);
+
+        // Resolve relative URLs to absolute
+        if (best.startsWith("//")) {
+            best = "https:" + best;
+        } else if (best.startsWith("/")) {
+            URI base = URI.create(rawUrl);
+            String port = (base.getPort() != -1) ? ":" + base.getPort() : "";
+            best = base.getScheme() + "://" + base.getHost() + port + best;
+        } else if (!best.toLowerCase().startsWith("http")) {
+            String basePath = rawUrl.contains("/") ? rawUrl.substring(0, rawUrl.lastIndexOf('/') + 1) : rawUrl + "/";
+            best = basePath + best;
+        }
+
+        log.info("[SmartLink] Found {} installer link(s) on page. Best match: {}", candidates.size(), best);
+        return best;
     }
 
     private boolean isNameMatch(String installedName, String targetName) {
