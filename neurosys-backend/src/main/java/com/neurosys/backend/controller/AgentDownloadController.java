@@ -318,10 +318,15 @@ public class AgentDownloadController {
             writeZipEntry(zos, "setup-agent.bat", setupBatContent.getBytes());
 
             // 8. Write Run-NeuroSys-Agent.bat
+            // IMPORTANT: Do NOT hardcode NEUROSYS_AGENT_ID - each computer generates its own unique ID
+            // from hardware (hostname + MAC address hash) persisted in agent_id.txt on first run.
             String runBatContent =
                     "@echo off\r\n" +
                     "title NeuroSys Cloud Monitoring Agent Daemon\r\n" +
                     "cd /d \"%~dp0\"\r\n" +
+                    "set \"NEUROSYS_SERVER_URL=https://realtimesystem-production.up.railway.app/api/v1\"\r\n" +
+                    "set \"NEUROSYS_LAB_NAME=" + lab.getName() + "\"\r\n" +
+                    "set \"NEUROSYS_ENROLLMENT_CODE=" + activeCode + "\"\r\n" +
                     "set \"JAVA_EXE=javaw.exe\"\r\n" +
                     "if exist \"%~dp0jre\\bin\\javaw.exe\" (\r\n" +
                     "    set \"JAVA_EXE=%~dp0jre\\bin\\javaw.exe\"\r\n" +
@@ -348,7 +353,8 @@ public class AgentDownloadController {
                     "goto agent_loop\r\n";
             writeZipEntry(zos, "Run-NeuroSys-Agent.bat", runBatContent.getBytes());
 
-            // 9. Write install-service.ps1
+            // 9. Write install-service.ps1 - registers BOTH AtStartup + AtLogon triggers so agent starts
+            // even when Windows boots without an interactive user session (e.g. after power failure)
             String ps1Content =
                     "$ErrorActionPreference = 'Stop'\r\n" +
                     "$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n" +
@@ -363,11 +369,22 @@ public class AgentDownloadController {
                     "try {\r\n" +
                     "    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null\r\n" +
                     "    $Action = New-ScheduledTaskAction -Execute $WScriptExe -ArgumentList \"`\"$SilentVbs`\" `\"$BatLauncher`\"\" -WorkingDirectory $ScriptDir\r\n" +
+                    "    $TriggerStartup = New-ScheduledTaskTrigger -AtStartup\r\n" +
                     "    $TriggerLogon = New-ScheduledTaskTrigger -AtLogon\r\n" +
-                    "    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable\r\n" +
-                    "    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $TriggerLogon -Settings $Settings -User $env:USERNAME -Force | Out-Null\r\n" +
-                    "    Write-Host ' [OK] Silent Task registered successfully.' -ForegroundColor Green\r\n" +
-                    "    Start-ScheduledTask -TaskName $TaskName | Out-Null\r\n" +
+                    "    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0)\r\n" +
+                    "    $Registered = $false\r\n" +
+                    "    try {\r\n" +
+                    "        $Principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\r\n" +
+                    "        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger @($TriggerStartup, $TriggerLogon) -Settings $Settings -Principal $Principal -Force | Out-Null\r\n" +
+                    "        $Registered = $true\r\n" +
+                    "    } catch {\r\n" +
+                    "        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger @($TriggerStartup, $TriggerLogon) -Settings $Settings -User $env:USERNAME -Force | Out-Null\r\n" +
+                    "        $Registered = $true\r\n" +
+                    "    }\r\n" +
+                    "    if ($Registered) {\r\n" +
+                    "        Write-Host ' [OK] Silent Task registered (AtStartup + AtLogon).' -ForegroundColor Green\r\n" +
+                    "        Start-ScheduledTask -TaskName $TaskName | Out-Null\r\n" +
+                    "    }\r\n" +
                     "} catch {\r\n" +
                     "    Write-Host ' [NOTICE] Running silent background agent fallback.' -ForegroundColor Yellow\r\n" +
                     "    Start-Process $WScriptExe -ArgumentList \"`\"$SilentVbs`\" `\"$BatLauncher`\"\" -WorkingDirectory $ScriptDir\r\n" +

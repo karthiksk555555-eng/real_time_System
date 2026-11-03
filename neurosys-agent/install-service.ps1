@@ -34,7 +34,7 @@ $PropsPath = Join-Path $ScriptDir "agent.properties"
 if (-not (Test-Path $PropsPath)) {
     $DefaultProps = @"
 # NeuroSys Monitoring Agent Production Configuration
-server.url=https://realtimesystemmonitoring-production-7322.up.railway.app/api/v1
+server.url=https://realtimesystem-production.up.railway.app/api/v1
 agent.lab.name=Computer Lab
 agent.collection.interval.seconds=1
 agent.cache.dir=./cache

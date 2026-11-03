@@ -221,7 +221,9 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
     @Transactional(readOnly = true)
     public List<AgentDeploymentTaskDto> getPendingTasksForAgent(String agentId) {
         Set<DeploymentTargetStatus> activeStatuses = Set.of(
-                DeploymentTargetStatus.PENDING
+                DeploymentTargetStatus.PENDING,
+                DeploymentTargetStatus.DOWNLOADING,
+                DeploymentTargetStatus.INSTALLING
         );
 
         List<SoftwareDeploymentTarget> targets = targetRepository.findPendingTasksForAgent(agentId, activeStatuses);
@@ -310,7 +312,7 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
         } else if (!anyPending && (completedCount > 0 || failedOrCancelledCount > 0)) {
             dep.setStatus(DeploymentTaskStatus.PARTIALLY_COMPLETED);
         } else if (anyPending) {
-            dep.setStatus(DeploymentTaskStatus.IN_PROGRESS);
+            dep.setStatus(DeploymentTaskStatus.PENDING); // Stays PENDING until agent actually starts working
         }
 
         deploymentRepository.save(dep);
@@ -322,7 +324,7 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
     public void checkAndExpireDeployments() {
         Instant now = Instant.now();
         List<SoftwareDeploymentTarget> expiredTargets = targetRepository.findExpiredTargets(
-                Set.of(DeploymentTargetStatus.PENDING, DeploymentTargetStatus.DOWNLOADING),
+                Set.of(DeploymentTargetStatus.PENDING, DeploymentTargetStatus.DOWNLOADING, DeploymentTargetStatus.INSTALLING),
                 now
         );
 
@@ -336,6 +338,23 @@ public class SoftwareDeploymentServiceImpl implements SoftwareDeploymentService 
 
         if (!expiredTargets.isEmpty()) {
             log.info("Expired {} pending deployment targets", expiredTargets.size());
+        }
+
+        // Recover stale jobs stuck in DOWNLOADING or INSTALLING for > 30 minutes
+        Instant staleThreshold = now.minus(30, ChronoUnit.MINUTES);
+        List<SoftwareDeploymentTarget> staleTargets = targetRepository.findStaleActiveTargets(
+                Set.of(DeploymentTargetStatus.DOWNLOADING, DeploymentTargetStatus.INSTALLING),
+                staleThreshold
+        );
+        for (SoftwareDeploymentTarget target : staleTargets) {
+            target.setStatus(DeploymentTargetStatus.FAILED);
+            target.setStatusDetail("Timed out after 30 minutes with no progress update from agent");
+            target.setCompletedAt(now);
+            targetRepository.save(target);
+            recalculateDeploymentStatus(target.getDeployment());
+        }
+        if (!staleTargets.isEmpty()) {
+            log.warn("Recovered {} stale deployment targets stuck in DOWNLOADING/INSTALLING > 30 min", staleTargets.size());
         }
     }
 

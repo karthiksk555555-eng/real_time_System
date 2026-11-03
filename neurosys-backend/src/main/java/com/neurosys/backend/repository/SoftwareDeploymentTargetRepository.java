@@ -26,4 +26,7 @@ public interface SoftwareDeploymentTargetRepository extends JpaRepository<Softwa
 
     @Query("SELECT t FROM SoftwareDeploymentTarget t WHERE t.status IN :statuses AND t.deployment.expiresAt < :now")
     List<SoftwareDeploymentTarget> findExpiredTargets(@Param("statuses") Collection<DeploymentTargetStatus> statuses, @Param("now") Instant now);
+
+    @Query("SELECT t FROM SoftwareDeploymentTarget t WHERE t.status IN :statuses AND t.startedAt < :threshold")
+    List<SoftwareDeploymentTarget> findStaleActiveTargets(@Param("statuses") Collection<DeploymentTargetStatus> statuses, @Param("threshold") Instant threshold);
 }
