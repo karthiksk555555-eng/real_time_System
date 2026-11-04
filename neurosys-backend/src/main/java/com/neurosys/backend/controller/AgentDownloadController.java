@@ -320,28 +320,29 @@ public class AgentDownloadController {
             // 8. Write Run-NeuroSys-Agent.bat
             // IMPORTANT: Do NOT hardcode NEUROSYS_AGENT_ID - each computer generates its own unique ID
             // from hardware (hostname + MAC address hash) persisted in agent_id.txt on first run.
+            // CRITICAL: Clear stopped.flag on startup so the loop does not exit immediately after boot.
             String runBatContent =
                     "@echo off\r\n" +
                     "title NeuroSys Cloud Monitoring Agent Daemon\r\n" +
                     "cd /d \"%~dp0\"\r\n" +
+                    ":: Clear stale stopped.flag so agent starts fresh on every boot/task trigger\r\n" +
+                    "if exist \"%~dp0cache\\stopped.flag\" del /f /q \"%~dp0cache\\stopped.flag\" >nul 2>&1\r\n" +
                     "set \"NEUROSYS_SERVER_URL=https://realtimesystem-production.up.railway.app/api/v1\"\r\n" +
                     "set \"NEUROSYS_LAB_NAME=" + lab.getName() + "\"\r\n" +
                     "set \"NEUROSYS_ENROLLMENT_CODE=" + activeCode + "\"\r\n" +
-                    "set \"JAVA_EXE=javaw.exe\"\r\n" +
-                    "if exist \"%~dp0jre\\bin\\javaw.exe\" (\r\n" +
-                    "    set \"JAVA_EXE=%~dp0jre\\bin\\javaw.exe\"\r\n" +
-                    ") else if exist \"%~dp0jre\\bin\\java.exe\" (\r\n" +
-                    "    set \"JAVA_EXE=%~dp0jre\\bin\\java.exe\"\r\n" +
-                    ")\r\n" +
+                    ":: Detect Java - try bundled JRE first, then common install paths, then PATH\r\n" +
+                    "set \"JAVA_EXE=java.exe\"\r\n" +
+                    "if exist \"%~dp0jre\\bin\\java.exe\" set \"JAVA_EXE=%~dp0jre\\bin\\java.exe\"\r\n" +
+                    "if exist \"%ProgramFiles%\\Eclipse Adoptium\\jdk-17.0.14.7-hotspot\\bin\\java.exe\" set \"JAVA_EXE=%ProgramFiles%\\Eclipse Adoptium\\jdk-17.0.14.7-hotspot\\bin\\java.exe\"\r\n" +
                     ":agent_loop\r\n" +
                     "if exist \"%~dp0cache\\stopped.flag\" exit /b 0\r\n" +
                     "set \"ACTIVE_JAR=\"\r\n" +
                     "if exist \"%~dp0neurosys-agent-1.0.0-SNAPSHOT-exec.jar\" set \"ACTIVE_JAR=%~dp0neurosys-agent-1.0.0-SNAPSHOT-exec.jar\"\r\n" +
-                    "if not defined ACTIVE_JAR if exist \"%~dp0neurosys-agent-1.0.0.jar\" set \"ACTIVE_JAR=%~dp0neurosys-agent-1.0.0.jar\"\r\n" +
-                    "if not defined ACTIVE_JAR if exist \"%~dp0neurosys-agent-1.0.0-SNAPSHOT.jar\" set \"ACTIVE_JAR=%~dp0neurosys-agent-1.0.0-SNAPSHOT.jar\"\r\n" +
                     "if not defined ACTIVE_JAR if exist \"%~dp0target\\neurosys-agent-1.0.0-SNAPSHOT-exec.jar\" set \"ACTIVE_JAR=%~dp0target\\neurosys-agent-1.0.0-SNAPSHOT-exec.jar\"\r\n" +
                     "if defined ACTIVE_JAR (\r\n" +
-                    "    \"%JAVA_EXE%\" -jar \"%ACTIVE_JAR%\"\r\n" +
+                    "    echo [%DATE% %TIME%] Starting NeuroSys Agent... >> \"%~dp0neurosys-agent.log\" 2>&1\r\n" +
+                    "    \"%JAVA_EXE%\" -jar \"%ACTIVE_JAR%\" >> \"%~dp0neurosys-agent.log\" 2>&1\r\n" +
+                    "    echo [%DATE% %TIME%] Agent exited. Restarting in 5s... >> \"%~dp0neurosys-agent.log\" 2>&1\r\n" +
                     ") else (\r\n" +
                     "    ping -n 10 127.0.0.1 >nul\r\n" +
                     "    if exist \"%~dp0cache\\stopped.flag\" exit /b 0\r\n" +
@@ -353,43 +354,88 @@ public class AgentDownloadController {
                     "goto agent_loop\r\n";
             writeZipEntry(zos, "Run-NeuroSys-Agent.bat", runBatContent.getBytes());
 
-            // 9. Write install-service.ps1 - registers BOTH AtStartup + AtLogon triggers so agent starts
-            // even when Windows boots without an interactive user session (e.g. after power failure)
+            // 9. Write install-service.ps1 - v2.0
+            // Registers BOTH AtStartup + AtLogon triggers so agent starts even without login.
+            // Also registers a watchdog task that fires every 2 minutes to restart crashed agents.
+            // Clears stopped.flag before launch so the bat loop doesn't exit immediately.
             String ps1Content =
+                    "# NeuroSys Agent Installer v2.0\r\n" +
                     "$ErrorActionPreference = 'Stop'\r\n" +
                     "$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n" +
                     "Set-Location $ScriptDir\r\n" +
                     "Write-Host '===================================================' -ForegroundColor Cyan\r\n" +
-                    "Write-Host ' NeuroSys Telemetry Agent - Automatic Service Installer' -ForegroundColor Cyan\r\n" +
+                    "Write-Host ' NeuroSys Telemetry Agent - Auto-Boot Installer v2.0' -ForegroundColor Cyan\r\n" +
                     "Write-Host '===================================================' -ForegroundColor Cyan\r\n" +
                     "$TaskName = 'NeuroSysAgent'\r\n" +
+                    "$WatchdogTask = 'NeuroSysAgentWatchdog'\r\n" +
                     "$BatLauncher = Join-Path $ScriptDir 'Run-NeuroSys-Agent.bat'\r\n" +
                     "$SilentVbs = Join-Path $ScriptDir 'Run-Silent.vbs'\r\n" +
+                    "$WatchdogPs1 = Join-Path $ScriptDir 'NeuroSys-Watchdog.ps1'\r\n" +
                     "$WScriptExe = Join-Path $env:SystemRoot 'System32\\wscript.exe'\r\n" +
+                    "$PowerShellExe = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'\r\n" +
+                    "# Remove stale stopped.flag\r\n" +
+                    "$StopFlag = Join-Path $ScriptDir 'cache\\stopped.flag'\r\n" +
+                    "if (Test-Path $StopFlag) { Remove-Item $StopFlag -Force -ErrorAction SilentlyContinue }\r\n" +
+                    "# Register main agent task\r\n" +
                     "try {\r\n" +
                     "    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null\r\n" +
                     "    $Action = New-ScheduledTaskAction -Execute $WScriptExe -ArgumentList \"`\"$SilentVbs`\" `\"$BatLauncher`\"\" -WorkingDirectory $ScriptDir\r\n" +
                     "    $TriggerStartup = New-ScheduledTaskTrigger -AtStartup\r\n" +
+                    "    $TriggerStartup.Delay = 'PT30S'\r\n" +
                     "    $TriggerLogon = New-ScheduledTaskTrigger -AtLogon\r\n" +
-                    "    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0)\r\n" +
-                    "    $Registered = $false\r\n" +
+                    "    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0) -MultipleInstances IgnoreNew\r\n" +
                     "    try {\r\n" +
                     "        $Principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\r\n" +
                     "        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger @($TriggerStartup, $TriggerLogon) -Settings $Settings -Principal $Principal -Force | Out-Null\r\n" +
-                    "        $Registered = $true\r\n" +
+                    "        Write-Host ' [OK] Agent task registered as SYSTEM (AtStartup + AtLogon).' -ForegroundColor Green\r\n" +
                     "    } catch {\r\n" +
-                    "        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger @($TriggerStartup, $TriggerLogon) -Settings $Settings -User $env:USERNAME -Force | Out-Null\r\n" +
-                    "        $Registered = $true\r\n" +
+                    "        Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger @($TriggerStartup, $TriggerLogon) -Settings $Settings -User $env:USERNAME -RunLevel Highest -Force | Out-Null\r\n" +
+                    "        Write-Host ' [OK] Agent task registered as current user (AtStartup + AtLogon).' -ForegroundColor Green\r\n" +
                     "    }\r\n" +
-                    "    if ($Registered) {\r\n" +
-                    "        Write-Host ' [OK] Silent Task registered (AtStartup + AtLogon).' -ForegroundColor Green\r\n" +
-                    "        Start-ScheduledTask -TaskName $TaskName | Out-Null\r\n" +
-                    "    }\r\n" +
+                    "    Start-ScheduledTask -TaskName $TaskName | Out-Null\r\n" +
                     "} catch {\r\n" +
-                    "    Write-Host ' [NOTICE] Running silent background agent fallback.' -ForegroundColor Yellow\r\n" +
+                    "    Write-Host ' [NOTICE] Falling back to direct wscript launch.' -ForegroundColor Yellow\r\n" +
                     "    Start-Process $WScriptExe -ArgumentList \"`\"$SilentVbs`\" `\"$BatLauncher`\"\" -WorkingDirectory $ScriptDir\r\n" +
-                    "}\r\n";
+                    "}\r\n" +
+                    "# Register watchdog task (fires every 2 minutes to restart crashed agent)\r\n" +
+                    "if (Test-Path $WatchdogPs1) {\r\n" +
+                    "    try {\r\n" +
+                    "        Unregister-ScheduledTask -TaskName $WatchdogTask -Confirm:$false -ErrorAction SilentlyContinue | Out-Null\r\n" +
+                    "        $WdAction = New-ScheduledTaskAction -Execute $PowerShellExe -Argument \"-NoProfile -ExecutionPolicy Bypass -File `\"$WatchdogPs1`\"\" -WorkingDirectory $ScriptDir\r\n" +
+                    "        $WdTrigger = New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes 2) -Once -At (Get-Date)\r\n" +
+                    "        $WdSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 1)\r\n" +
+                    "        try {\r\n" +
+                    "            $WdPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest\r\n" +
+                    "            Register-ScheduledTask -TaskName $WatchdogTask -Action $WdAction -Trigger $WdTrigger -Settings $WdSettings -Principal $WdPrincipal -Force | Out-Null\r\n" +
+                    "        } catch {\r\n" +
+                    "            Register-ScheduledTask -TaskName $WatchdogTask -Action $WdAction -Trigger $WdTrigger -Settings $WdSettings -User $env:USERNAME -Force | Out-Null\r\n" +
+                    "        }\r\n" +
+                    "        Write-Host ' [OK] Watchdog task registered (every 2 min).' -ForegroundColor Green\r\n" +
+                    "    } catch {\r\n" +
+                    "        Write-Host ' [WARNING] Could not register watchdog task.' -ForegroundColor Yellow\r\n" +
+                    "    }\r\n" +
+                    "}\r\n" +
+                    "Write-Host '' ; Write-Host ' Setup complete! Agent runs silently and starts automatically.' -ForegroundColor Green\r\n";
             writeZipEntry(zos, "install-service.ps1", ps1Content.getBytes());
+
+            // 9b. Write NeuroSys-Watchdog.ps1 - checks every 2 min if agent is alive, restarts if not
+            String watchdogContent =
+                    "# NeuroSys Agent Watchdog v1.0\r\n" +
+                    "$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path\r\n" +
+                    "$LogFile = Join-Path $ScriptDir 'neurosys-agent.log'\r\n" +
+                    "$StopFlag = Join-Path $ScriptDir 'cache\\stopped.flag'\r\n" +
+                    "$BatLauncher = Join-Path $ScriptDir 'Run-NeuroSys-Agent.bat'\r\n" +
+                    "$SilentVbs = Join-Path $ScriptDir 'Run-Silent.vbs'\r\n" +
+                    "$WScriptExe = Join-Path $env:SystemRoot 'System32\\wscript.exe'\r\n" +
+                    "$TaskName = 'NeuroSysAgent'\r\n" +
+                    "function Write-Log { param([string]$M); $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; Add-Content -Path $LogFile -Value \"[$ts] [WATCHDOG] $M\" -ErrorAction SilentlyContinue }\r\n" +
+                    "if (Test-Path $StopFlag) { exit 0 }\r\n" +
+                    "$alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { ($_.Name -eq 'java.exe' -or $_.Name -eq 'javaw.exe') -and $_.CommandLine -like '*neurosys-agent*' }\r\n" +
+                    "if ($alive -and $alive.Count -gt 0) { exit 0 }\r\n" +
+                    "Write-Log 'Agent process not found. Restarting...'\r\n" +
+                    "try { $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue; if ($t) { Start-ScheduledTask -TaskName $TaskName; Write-Log 'Restarted via scheduled task.'; exit 0 } } catch {}\r\n" +
+                    "try { Start-Process -FilePath $WScriptExe -ArgumentList \"`\"$SilentVbs`\" `\"$BatLauncher`\"\" -WorkingDirectory $ScriptDir; Write-Log 'Restarted via wscript.' } catch { Write-Log \"FAILED: $_\" }\r\n";
+            writeZipEntry(zos, "NeuroSys-Watchdog.ps1", watchdogContent.getBytes());
 
             // 10. Write README-INSTALLATION.txt
             String readmeContent = String.format(
